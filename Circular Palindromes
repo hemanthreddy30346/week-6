@@ -1,0 +1,393 @@
+import java.io.*;
+import java.util.*;
+
+public class Solution {
+
+    /*
+     * Segment tree supporting:
+     *   range update: tree[node] = max(tree[node], value)
+     *   point query
+     */
+    static class SegmentTree {
+        int size;
+        int[] tree;
+
+        SegmentTree(int n) {
+            size = 1;
+            while (size < n) {
+                size <<= 1;
+            }
+
+            tree = new int[size << 1];
+        }
+
+        void update(int left, int right, int value) {
+            if (left > right) {
+                return;
+            }
+
+            left += size;
+            right += size;
+
+            while (left <= right) {
+                if ((left & 1) == 1) {
+                    tree[left] = Math.max(tree[left], value);
+                    left++;
+                }
+
+                if ((right & 1) == 0) {
+                    tree[right] = Math.max(tree[right], value);
+                    right--;
+                }
+
+                left >>= 1;
+                right >>= 1;
+            }
+        }
+
+        int query(int index) {
+            index += size;
+
+            int result = 0;
+
+            while (index > 0) {
+                result = Math.max(result, tree[index]);
+                index >>= 1;
+            }
+
+            return result;
+        }
+    }
+
+    /*
+     * Manacher's algorithm.
+     *
+     * The transformed representation is:
+     *
+     * # a # b # c #
+     *
+     * radius[] stores palindrome length in terms
+     * of the original characters.
+     */
+    static int[] manacher(String s) {
+        int n = s.length();
+
+        char[] transformed = new char[2 * n + 1];
+
+        for (int i = 0; i < n; i++) {
+            transformed[2 * i] = '#';
+            transformed[2 * i + 1] = s.charAt(i);
+        }
+
+        transformed[2 * n] = '#';
+
+        int len = transformed.length;
+        int[] radius = new int[len];
+
+        int center = 0;
+        int right = 0;
+
+        for (int i = 0; i < len; i++) {
+
+            int mirror = 2 * center - i;
+
+            if (i < right) {
+                radius[i] = Math.min(
+                        right - i,
+                        mirror >= 0 ? radius[mirror] : 0
+                );
+            }
+
+            while (i - radius[i] - 1 >= 0 &&
+                   i + radius[i] + 1 < len &&
+                   transformed[i - radius[i] - 1]
+                           == transformed[i + radius[i] + 1]) {
+
+                radius[i]++;
+            }
+
+            if (i + radius[i] > right) {
+                center = i;
+                right = i + radius[i];
+            }
+        }
+
+        return radius;
+    }
+
+    /*
+     * Returns the palindrome length represented by each
+     * center in the doubled string.
+     */
+    static int[] getPalindromes(String s) {
+        int n = s.length();
+
+        String doubled = s + s;
+
+        int[] radius = manacher(doubled);
+
+        /*
+         * We need centers in the transformed string.
+         *
+         * Convert the Manacher radius into the maximum
+         * palindrome length in original characters.
+         */
+        int[] pal = new int[4 * n];
+
+        for (int i = 0; i < 4 * n; i++) {
+
+            int r = radius[i];
+
+            if (r == 0) {
+                continue;
+            }
+
+            /*
+             * The radius is measured in transformed
+             * characters. Convert it to actual characters.
+             */
+            int length;
+
+            if ((i & 1) == 0) {
+                // Center is between characters -> even palindrome
+                length = r;
+            } else {
+                // Center is on a character -> odd palindrome
+                length = r + 1;
+            }
+
+            /*
+             * A palindrome cannot be longer than the
+             * complete rotation.
+             */
+            length = Math.min(length, n);
+
+            pal[i] = length;
+        }
+
+        return pal;
+    }
+
+    /*
+     * Efficient solution.
+     */
+    static int[] solve(String s) {
+        int n = s.length();
+
+        /*
+         * Duplicate the string so palindromes crossing
+         * the circular boundary become ordinary substrings.
+         */
+        String doubled = s + s;
+
+        int[] radius = manacher(doubled);
+
+        /*
+         * answer[i] = best palindrome currently known
+         * for rotation i.
+         */
+        int[] answer = new int[n];
+
+        SegmentTree tree = new SegmentTree(n);
+
+        /*
+         * Each center can provide a palindrome for a range
+         * of rotations.
+         */
+        for (int center = 0; center < 2 * n; center++) {
+
+            /*
+             * Odd palindrome.
+             *
+             * transformed index = 2 * center + 1
+             */
+            int oddRadius = radius[2 * center + 1];
+
+            int oddLength = Math.min(oddRadius + 1, n);
+
+            if (oddLength > 0) {
+                updateRotations(
+                        tree,
+                        n,
+                        center,
+                        oddLength
+                );
+            }
+
+            /*
+             * Even palindrome.
+             *
+             * transformed index = 2 * center
+             */
+            int evenRadius = radius[2 * center];
+
+            int evenLength = Math.min(evenRadius, n);
+
+            if (evenLength > 0) {
+                updateRotations(
+                        tree,
+                        n,
+                        center,
+                        evenLength
+                );
+            }
+        }
+
+        /*
+         * Get the best directly represented palindrome.
+         */
+        for (int i = 0; i < n; i++) {
+            answer[i] = tree.query(i);
+        }
+
+        /*
+         * If a palindrome of length L exists for one rotation,
+         * moving the rotation by one position can reduce the
+         * maximum possible length by at most 2.
+         *
+         * Propagate these values around the circle.
+         */
+        Integer[] order = new Integer[n];
+
+        for (int i = 0; i < n; i++) {
+            order[i] = i;
+        }
+
+        Arrays.sort(
+                order,
+                (a, b) -> Integer.compare(answer[a], answer[b])
+        );
+
+        for (int x = n - 1; x >= 0; x--) {
+
+            int start = order[x];
+
+            /*
+             * Move left around the circle.
+             */
+            int current = start;
+
+            while (true) {
+                int previous = (current - 1 + n) % n;
+
+                if (answer[previous] >= answer[current] - 2) {
+                    break;
+                }
+
+                answer[previous] = answer[current] - 2;
+                current = previous;
+
+                if (current == start) {
+                    break;
+                }
+            }
+
+            /*
+             * Move right around the circle.
+             */
+            current = start;
+
+            while (true) {
+                int next = (current + 1) % n;
+
+                if (answer[next] >= answer[current] - 2) {
+                    break;
+                }
+
+                answer[next] = answer[current] - 2;
+                current = next;
+
+                if (current == start) {
+                    break;
+                }
+            }
+        }
+
+        return answer;
+    }
+
+    /*
+     * Map a palindrome centered at 'center' with length
+     * 'length' to all rotations that can contain it.
+     *
+     * This implementation performs the necessary circular
+     * interval update.
+     */
+    static void updateRotations(
+            SegmentTree tree,
+            int n,
+            int center,
+            int length) {
+
+        /*
+         * A palindrome of length L has a start position.
+         *
+         * For a rotation to contain it, the rotation start
+         * can lie in a circular interval.
+         */
+        int half = length / 2;
+
+        int start;
+        int end;
+
+        if ((length & 1) == 1) {
+            /*
+             * Odd length.
+             */
+            start = center - half;
+            end = center + half;
+        } else {
+            /*
+             * Even length.
+             */
+            start = center - half;
+            end = center + half - 1;
+        }
+
+        /*
+         * Convert palindrome location to possible rotation
+         * starting positions.
+         */
+        int left = start - (n - length);
+        int right = start;
+
+        left = mod(left, n);
+        right = mod(right, n);
+
+        if (left <= right) {
+            tree.update(left, right, length);
+        } else {
+            tree.update(left, n - 1, length);
+            tree.update(0, right, length);
+        }
+    }
+
+    static int mod(int x, int n) {
+        x %= n;
+
+        if (x < 0) {
+            x += n;
+        }
+
+        return x;
+    }
+
+    public static void main(String[] args) throws Exception {
+
+        BufferedReader br =
+                new BufferedReader(new InputStreamReader(System.in));
+
+        int n = Integer.parseInt(br.readLine().trim());
+        String s = br.readLine().trim();
+
+        int[] result = solve(s);
+
+        StringBuilder output = new StringBuilder();
+
+        for (int value : result) {
+            output.append(value).append('\n');
+        }
+
+        System.out.print(output);
+    }
+}
